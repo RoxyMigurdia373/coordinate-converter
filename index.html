@@ -4,11 +4,13 @@
     .paste-input{display:block;width:100%;margin:0 0 10px;padding:9px 10px;border:1px solid #e1e8e4;border-radius:8px;background:#fff;color:#334b41;font-size:14px;outline:none}.paste-input:focus{border-color:#219a77}.paste-input::placeholder{color:#929e98;font-size:12px}
   
 main{padding-top:18px}header{margin-bottom:14px}h1{font-size:24px}.modes{display:grid;grid-template-columns:1fr 32px 1fr;align-items:center;gap:4px;margin:12px 0}.modes label{font-size:11px;color:#667a72}.modes select{display:block;width:100%;margin-top:4px;padding:10px 5px;background:#fff;border:1px solid #dbe5df;border-radius:9px;color:#204e3d;font-size:13px}.modes button{border:0;background:transparent;color:#258064;font-size:21px;margin-top:16px}.coordinate{padding:12px;margin-bottom:9px}.label{margin-bottom:8px}.paste-input{margin-bottom:8px}.field{padding:7px 8px}.field input{font-size:21px}.result{margin:12px 0;padding:13px}#result{font-size:16px;letter-spacing:0;resize:none;line-height:1.6;padding:10px 0;min-height:68px;overflow-wrap:anywhere;white-space:pre-wrap;word-break:break-all}.keypad button{min-height:43px}.keypad{gap:7px}.hint{font-size:11px;color:#84918b;margin-top:6px}.fields.single{grid-template-columns:1fr}.fields.double{grid-template-columns:1fr 1.5fr}@media(min-width:600px){main{margin:20px auto}}textarea{font:inherit}
+ .zones{background:white;border:1px solid #dbe5df;border-radius:14px;padding:12px;margin:12px 0;font-size:13px;line-height:1.7}.zones h2{font-size:14px;margin:0 0 6px}.zones p{margin:7px 0}.zones small{display:block;color:#718278;font-size:11px}.zones strong{color:#185c43}
 </style></head><body><main>
 <header><h1>坐标转换器</h1><p>三种格式互转 · 经度在前，纬度在后</p></header>
 <div class="modes"><label>输入格式<select id="from" aria-label="输入格式"><option value="dms">度分秒</option><option value="dd">十进制度</option><option value="dm">度分（小数分）</option></select></label><button id="swap" aria-label="交换输入输出格式">⇄</button><label>输出格式<select id="to" aria-label="输出格式"><option value="dd">十进制度</option><option value="dms">度分秒</option><option value="dm">度分（小数分）</option></select></label></div>
 <div id="coordinates"></div>
 <section class="result" aria-label="转换结果"><div class="result-top"><span id="result-label">十进制度</span><select id="precision" aria-label="保留小数位数"><option value="2">2 位小数</option><option value="3" selected>3 位小数</option><option value="4">4 位小数</option><option value="5">5 位小数</option><option value="6">6 位小数</option></select></div><textarea id="result" aria-label="可复制的经纬度" rows="2" readonly placeholder="等待输入"></textarea><button id="copy" disabled>复制坐标</button></section>
+<section class="zones" aria-label="投影分带"><h2>投影分带 · 自动计算</h2><div id="zones" aria-live="polite">输入完整经纬度后显示</div><small>按经纬度推荐分带，不转换大地基准或投影坐标。分界线上采用东侧带；项目指定坐标系优先。</small></section>
 <div class="keypad" aria-label="数字键盘"><button data-key="7" class="" >7</button><button data-key="8" class="" >8</button><button data-key="9" class="" >9</button><button data-key="4" class="" >4</button><button data-key="5" class="" >5</button><button data-key="6" class="" >6</button><button data-key="1" class="" >1</button><button data-key="2" class="" >2</button><button data-key="3" class="" >3</button><button data-key="." class="" >.</button><button data-key="0" class="" >0</button><button data-key="backspace" class="" aria-label="删除一位">⌫</button><button data-key="clear" class="utility" >全部清空</button><button data-key="sign" class="utility" >正负 ±</button><button data-key="next" class="next" >下一项 →</button></div>
 <p id="status" class="status" role="status" aria-live="polite">输入或粘贴坐标，自动转换</p></main>
 <script>
@@ -38,11 +40,25 @@ function formatCoordinate(value,mode,p) {
   const m=Math.floor(ticks/(60*scale));ticks-=m*60*scale;
   return sign+d+'°'+m+'′'+(ticks/scale).toFixed(p)+'″';
 }
+function projectionZones(lon,lat){
+  let utm=Math.min(60,Math.floor((lon+180)/6)+1);
+  if(lat>=56&&lat<64&&lon>=3&&lon<12)utm=32;
+  if(lat>=72&&lat<=84&&lon>=0&&lon<42)utm=lon<9?31:lon<21?33:lon<33?35:37;
+  const hemisphere=lat<0?'S':'N';
+  const gk=Math.floor((lon+1.5)/3),cm=gk*3;
+  return {utm,hemisphere,utmEpsg:(lat<0?32700:32600)+utm,utmValid:lat>=-80&&lat<=84,gk,cm,gkValid:gk>=25&&gk<=45&&lat>=0,gkCmEpsg:4534+gk-25,gkZoneEpsg:4513+gk-25};
+}
+function showZones(lon,lat){
+  const z=projectionZones(lon,lat);
+  const utm=z.utmValid?'<strong>UTM '+z.utm+z.hemisphere+'</strong> · '+(z.hemisphere==='N'?'北半球':'南半球')+'<br>WGS 84 / UTM zone '+z.utm+z.hemisphere+'<br>EPSG:'+z.utmEpsg:'此纬度超出 UTM 常规适用范围（80°S—84°N）';
+  const gk=z.gkValid?'<strong>3° GK 第 '+z.gk+' 带 · 中央经线 '+z.cm+'°E</strong><br>CGCS2000 / 3-degree Gauss-Kruger CM '+z.cm+'E<br>EPSG:'+z.gkCmEpsg+'（CM，无带号前缀）<br><small>带号前缀版本：zone '+z.gk+' · EPSG:'+z.gkZoneEpsg+'</small>':'此位置不提供中国 CGCS2000 标准 3° GK 分带推荐';
+  $('#zones').innerHTML='<p>WGS 84（84）<br>'+utm+'</p><p>CGCS2000（2000）<br>'+gk+'</p>';
+}
 const $=s=>document.querySelector(s), names=['经度','纬度'],limits=[180,90], labels={dd:'十进制度',dm:'度分（小数分）',dms:'度分秒'};
 let active=0, fields=[], lastValues=null;
 let mode='dms';
 function message(text,error=false){$('#status').textContent=text;$('#status').classList.toggle('error',error)}
-function invalidate(text,error=false){lastValues=null;$('#result').value='';$('#copy').disabled=true;$('#copy').textContent='复制坐标';message(text,error)}
+function invalidate(text,error=false){$('#zones').textContent='输入完整有效经纬度后显示';lastValues=null;$('#result').value='';$('#copy').disabled=true;$('#copy').textContent='复制坐标';message(text,error)}
 function render(values=null){
   const units=mode==='dd'?['度']:mode==='dm'?['度','分']:['度','分','秒'];
   $('#coordinates').innerHTML=names.map((name,axis)=>'<section class="coordinate" aria-label="'+name+'"><div class="label">'+name+'<select class="direction" aria-label="'+name+'方向"><option value="1">'+(axis===0?'东经 E':'北纬 N')+'</option><option value="-1">'+(axis===0?'西经 W':'南纬 S')+'</option></select></div><input class="paste-input" data-axis="'+axis+'" aria-label="粘贴'+name+'或整组坐标" placeholder="'+(mode==='dd'?'粘贴十进制度，如 107.887611':mode==='dm'?'粘贴度分，如 107°53.256667′':'粘贴度分秒，如 107°53′15.40″')+'"><div class="fields '+(units.length===1?'single':units.length===2?'double':'')+'">'+units.map((u,i)=>'<label class="field"><input aria-label="'+name+' '+u+'" data-axis="'+axis+'" data-unit="'+i+'" readonly inputmode="none" placeholder="'+u+'"><span>'+['°','′','″'][i]+'</span></label>').join('')+'</div></section>').join('');
@@ -68,7 +84,7 @@ function current(){
 function update(){
   fields.forEach(f=>f.style.fontSize=f.value.length>10?'15px':f.value.length>8?'18px':'21px');
   $('#result-label').textContent=labels[$('#to').value];$('#copy').textContent='复制坐标';
-  try{const values=current(); if(values.includes(null)){invalidate('输入或粘贴坐标，自动转换');return}lastValues=values;$('#result').value=values.map(v=>formatCoordinate(v,$('#to').value,Number($('#precision').value))).join(',');$('#copy').disabled=false;message('已转换 · 经度在前，纬度在后')}catch(e){invalidate(e.message,true)}
+  try{const values=current(); if(values.includes(null)){invalidate('输入或粘贴坐标，自动转换');return}lastValues=values;showZones(values[0],values[1]);$('#result').value=values.map(v=>formatCoordinate(v,$('#to').value,Number($('#precision').value))).join(',');$('#copy').disabled=false;message('已转换 · 经度在前，纬度在后')}catch(e){invalidate(e.message,true)}
 }
 function paste(text,axis){
   if(!text.trim()){fields.filter(f=>Number(f.dataset.axis)===axis).forEach(f=>f.value='');update();return}
